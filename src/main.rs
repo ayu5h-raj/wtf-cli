@@ -440,12 +440,19 @@ fn get_combined_context() -> String {
     let mut context_str = String::new();
     let dir_context = get_directory_context();
     let git_context = get_git_context();
+    let project_context = get_project_context();
 
-    if dir_context.is_empty() && git_context.is_empty() {
+    if dir_context.is_empty() && git_context.is_empty() && project_context.is_empty() {
         return String::new();
     }
     
     context_str.push_str("\nCurrent Directory Context:\n");
+    
+    if !project_context.is_empty() {
+        context_str.push_str("Project Metadata:\n");
+        context_str.push_str(&project_context);
+        context_str.push_str("\n");
+    }
 
     if !dir_context.is_empty() {
         context_str.push_str("Files: [");
@@ -512,4 +519,26 @@ fn get_git_context() -> String {
         }
         _ => String::new(), // Not a git repo or git not found
     }
+}
+
+fn get_project_context() -> String {
+    let metadata_files = ["Cargo.toml", "package.json", "go.mod", "pyproject.toml"];
+    let mut context = String::new();
+
+    for file in metadata_files.iter() {
+        if let Ok(content) = fs::read_to_string(file) {
+            context.push_str(&format!("--- {} ---\n", file));
+            
+            // Read first 20 lines
+            let lines: Vec<&str> = content.lines().take(20).collect();
+            context.push_str(&lines.join("\n"));
+            
+            if content.lines().count() > 20 {
+                context.push_str("\n... (truncated)");
+            }
+            context.push_str("\n\n");
+        }
+    }
+
+    context
 }
