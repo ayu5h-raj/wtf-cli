@@ -23,14 +23,15 @@ function _wtf_run() {
         return 1
     fi
 
-    # Check for API key
-    if [[ -z "$GEMINI_API_KEY" ]]; then
-        echo "❌ GEMINI_API_KEY not set."
+    # Check for API key (WTF_API_KEY or GEMINI_API_KEY)
+    if [[ -z "$WTF_API_KEY" && -z "$GEMINI_API_KEY" ]]; then
+        echo "❌ API key not set."
         echo ""
-        echo "To get started:"
-        echo "1. Visit https://aistudio.google.com/app/apikey"
-        echo "2. Create a free API key"
-        echo "3. Add to your ~/.zshrc: export GEMINI_API_KEY='your-key-here'"
+        echo "Set one of these:"
+        echo "  export WTF_API_KEY='your-key'       # For any provider"
+        echo "  export GEMINI_API_KEY='your-key'    # For Gemini"
+        echo ""
+        echo "Get a free Gemini key: https://aistudio.google.com/app/apikey"
         return 1
     fi
 

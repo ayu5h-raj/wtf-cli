@@ -41,16 +41,28 @@ sudo mv wtf /usr/local/bin/
 
 ## Setup
 
-Get a free Gemini API key:
-
-1. Visit [Google AI Studio](https://aistudio.google.com/app/apikey)
-2. Create a free API key
-3. Add to your shell config:
+### Option 1: Gemini (Default, Free)
 
 ```bash
-echo 'export GEMINI_API_KEY="your-key-here"' >> ~/.zshrc
-source ~/.zshrc
+# Get a free key at: https://aistudio.google.com/app/apikey
+export GEMINI_API_KEY="your-gemini-key"
 ```
+
+### Option 2: OpenRouter / OpenAI / Azure / Ollama
+
+```bash
+export WTF_API_KEY="your-api-key"
+export WTF_BASE_URL="https://openrouter.ai/api/v1"  # or your provider's URL
+export WTF_MODEL="anthropic/claude-3-haiku"          # or any model
+```
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `WTF_API_KEY` | - | API key (or use `GEMINI_API_KEY`) |
+| `WTF_BASE_URL` | Gemini URL | Custom base URL (enables OpenAI-compatible mode) |
+| `WTF_MODEL` | `gemini-2.0-flash` | Model to use |
+
+Add to your `~/.zshrc` to persist.
 
 ## Usage
 
@@ -105,8 +117,8 @@ Execute? [yes/No/edit]: y
 ## How It Works
 
 1. You type a natural language prompt
-2. WTF sends it to the Gemini API with a specialized system prompt
-3. Gemini returns a shell command
+2. WTF sends it to your configured AI (Gemini, OpenRouter, OpenAI, etc.)
+3. The AI returns a shell command
 4. You review, edit, or run it
 
 ## License

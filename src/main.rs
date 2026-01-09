@@ -2,6 +2,8 @@ use anyhow::{Context, Result};
 use clap::Parser;
 use serde::{Deserialize, Serialize};
 use std::env;
+use std::io::{self, Write};
+use std::process::Command;
 
 /// WTF (Write The Formula) - Translate natural language to shell commands using AI
 #[derive(Parser, Debug)]
@@ -16,15 +18,57 @@ struct Args {
     raw: bool,
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// OpenAI-compatible API structures (works with OpenRouter, Azure, Ollama, etc.)
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[derive(Serialize)]
+struct OpenAIRequest {
+    model: String,
+    messages: Vec<Message>,
+    max_tokens: u32,
+}
+
+#[derive(Serialize)]
+struct Message {
+    role: String,
+    content: String,
+}
+
+#[derive(Deserialize)]
+struct OpenAIResponse {
+    choices: Option<Vec<Choice>>,
+    error: Option<OpenAIError>,
+}
+
+#[derive(Deserialize)]
+struct Choice {
+    message: MessageContent,
+}
+
+#[derive(Deserialize)]
+struct MessageContent {
+    content: String,
+}
+
+#[derive(Deserialize)]
+struct OpenAIError {
+    message: String,
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Gemini API structures (for backwards compatibility)
+// ─────────────────────────────────────────────────────────────────────────────
+
 #[derive(Serialize)]
 struct GeminiRequest {
-    contents: Vec<Content>,
+    contents: Vec<GeminiContent>,
     #[serde(rename = "systemInstruction")]
-    system_instruction: Content,
+    system_instruction: GeminiContent,
 }
 
 #[derive(Serialize, Deserialize)]
-struct Content {
+struct GeminiContent {
     parts: Vec<Part>,
 }
 
@@ -41,12 +85,71 @@ struct GeminiResponse {
 
 #[derive(Deserialize)]
 struct Candidate {
-    content: Content,
+    content: GeminiContent,
 }
 
 #[derive(Deserialize)]
 struct GeminiError {
     message: String,
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Configuration
+// ─────────────────────────────────────────────────────────────────────────────
+
+struct Config {
+    api_key: String,
+    base_url: String,
+    model: String,
+    provider: Provider,
+}
+
+#[derive(PartialEq)]
+enum Provider {
+    Gemini,
+    OpenAI, // OpenAI-compatible (OpenRouter, Azure, Ollama, etc.)
+}
+
+impl Config {
+    fn from_env() -> Result<Self> {
+        // Try WTF_API_KEY first, then fall back to GEMINI_API_KEY
+        let api_key = env::var("WTF_API_KEY")
+            .or_else(|_| env::var("GEMINI_API_KEY"))
+            .context(
+                "API key not set.\n\n\
+                Set one of these environment variables:\n\
+                  export WTF_API_KEY='your-key'      # For any provider\n\
+                  export GEMINI_API_KEY='your-key'   # For Gemini (legacy)\n\n\
+                Get a free Gemini key at: https://aistudio.google.com/app/apikey"
+            )?;
+
+        let base_url = env::var("WTF_BASE_URL").unwrap_or_default();
+        let model = env::var("WTF_MODEL").unwrap_or_default();
+
+        // Determine provider based on base_url
+        let (provider, base_url, model) = if base_url.is_empty() {
+            // Default to Gemini
+            (
+                Provider::Gemini,
+                "https://generativelanguage.googleapis.com/v1beta".to_string(),
+                if model.is_empty() { "gemini-2.0-flash".to_string() } else { model },
+            )
+        } else {
+            // Custom base URL = OpenAI-compatible
+            (
+                Provider::OpenAI,
+                base_url,
+                if model.is_empty() { "gpt-4o-mini".to_string() } else { model },
+            )
+        };
+
+        Ok(Config {
+            api_key,
+            base_url,
+            model,
+            provider,
+        })
+    }
 }
 
 const SYSTEM_PROMPT: &str = r#"You are a shell command expert. Your task is to translate the user's natural language request into a valid shell command.
@@ -74,18 +177,13 @@ User: compress this folder
 Output: tar -czvf archive.tar.gz .
 "#;
 
-use std::io::{self, Write};
-use std::process::Command;
-
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
     let prompt = args.prompt.join(" ");
+    let config = Config::from_env()?;
 
-    let api_key = env::var("GEMINI_API_KEY")
-        .context("GEMINI_API_KEY environment variable not set.\n\nTo get an API key:\n1. Visit https://aistudio.google.com/app/apikey\n2. Create a free API key\n3. Run: export GEMINI_API_KEY='your-key-here'")?;
-
-    let command = get_command_from_gemini(&api_key, &prompt).await?;
+    let command = get_command(&config, &prompt).await?;
     let command = command.trim();
 
     // Raw mode: just output the command and exit
@@ -120,7 +218,6 @@ async fn main() -> Result<()> {
             }
         }
         "e" | "edit" => {
-            // Copy to clipboard and inform user
             let _ = Command::new("sh")
                 .arg("-c")
                 .arg(format!("printf '%s' '{}' | pbcopy", command.replace("'", "'\\''")))
@@ -128,7 +225,6 @@ async fn main() -> Result<()> {
             println!("📋 Command copied to clipboard. Paste and edit it!");
         }
         _ => {
-            // Copy to clipboard on cancel too
             let _ = Command::new("sh")
                 .arg("-c")
                 .arg(format!("printf '%s' '{}' | pbcopy", command.replace("'", "'\\''")))
@@ -140,17 +236,23 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
+async fn get_command(config: &Config, prompt: &str) -> Result<String> {
+    match config.provider {
+        Provider::Gemini => get_command_gemini(config, prompt).await,
+        Provider::OpenAI => get_command_openai(config, prompt).await,
+    }
+}
 
-async fn get_command_from_gemini(api_key: &str, prompt: &str) -> Result<String> {
+async fn get_command_gemini(config: &Config, prompt: &str) -> Result<String> {
     let client = reqwest::Client::new();
 
     let request_body = GeminiRequest {
-        contents: vec![Content {
+        contents: vec![GeminiContent {
             parts: vec![Part {
                 text: prompt.to_string(),
             }],
         }],
-        system_instruction: Content {
+        system_instruction: GeminiContent {
             parts: vec![Part {
                 text: SYSTEM_PROMPT.to_string(),
             }],
@@ -158,8 +260,8 @@ async fn get_command_from_gemini(api_key: &str, prompt: &str) -> Result<String> 
     };
 
     let url = format!(
-        "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={}",
-        api_key
+        "{}/models/{}:generateContent?key={}",
+        config.base_url, config.model, config.api_key
     );
 
     let response = client
@@ -189,6 +291,58 @@ async fn get_command_from_gemini(api_key: &str, prompt: &str) -> Result<String> 
         .and_then(|c| c.content.parts.into_iter().next())
         .map(|p| p.text)
         .context("No command generated from Gemini")?;
+
+    Ok(command)
+}
+
+async fn get_command_openai(config: &Config, prompt: &str) -> Result<String> {
+    let client = reqwest::Client::new();
+
+    let request_body = OpenAIRequest {
+        model: config.model.clone(),
+        messages: vec![
+            Message {
+                role: "system".to_string(),
+                content: SYSTEM_PROMPT.to_string(),
+            },
+            Message {
+                role: "user".to_string(),
+                content: prompt.to_string(),
+            },
+        ],
+        max_tokens: 500,
+    };
+
+    let url = format!("{}/chat/completions", config.base_url);
+
+    let response = client
+        .post(&url)
+        .header("Authorization", format!("Bearer {}", config.api_key))
+        .header("Content-Type", "application/json")
+        .json(&request_body)
+        .send()
+        .await
+        .context("Failed to send request to API")?;
+
+    let status = response.status();
+    let response_text = response.text().await?;
+
+    if !status.is_success() {
+        anyhow::bail!("API error ({}): {}", status, response_text);
+    }
+
+    let openai_response: OpenAIResponse =
+        serde_json::from_str(&response_text).context("Failed to parse API response")?;
+
+    if let Some(error) = openai_response.error {
+        anyhow::bail!("API error: {}", error.message);
+    }
+
+    let command = openai_response
+        .choices
+        .and_then(|c| c.into_iter().next())
+        .map(|c| c.message.content)
+        .context("No command generated from API")?;
 
     Ok(command)
 }

@@ -95,9 +95,22 @@ jobs:
             # Add 'wtf' to plugins in ~/.zshrc
             ```
 
-            ### Usage
+            ### Setup
+            
+            **Gemini (Default, Free)**
             ```bash
             export GEMINI_API_KEY='your-key'
+            ```
+            
+            **OpenRouter / OpenAI / Other**
+            ```bash
+            export WTF_API_KEY='your-key'
+            export WTF_BASE_URL='https://openrouter.ai/api/v1'
+            export WTF_MODEL='your-model'
+            ```
+            
+            ### Usage
+            ```bash
             wtf "show my ip address"
             ```
           files: |
@@ -175,9 +188,12 @@ jobs:
 
             def caveats
               <<~EOS
-                To use WTF, you need a Gemini API key:
-                  1. Get a free key at https://aistudio.google.com/app/apikey
-                  2. Add to your shell: export GEMINI_API_KEY='your-key'
+                To use WTF, set an API key:
+                
+                Gemini (free): export GEMINI_API_KEY='your-key'
+                Other:         export WTF_API_KEY='key' WTF_BASE_URL='url' WTF_MODEL='model'
+                
+                Get a free Gemini key: https://aistudio.google.com/app/apikey
 
                 Usage: wtf "your question here"
               EOS
