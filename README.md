@@ -41,28 +41,32 @@ sudo mv wtf /usr/local/bin/
 
 ## Setup
 
-### Option 1: Gemini (Default, Free)
+### 1. Configure API Key
+
+**Gemini (Default, Free)**
 
 ```bash
 # Get a free key at: https://aistudio.google.com/app/apikey
 export GEMINI_API_KEY="your-gemini-key"
 ```
 
-### Option 2: OpenRouter / OpenAI / Azure / Ollama
+**OpenRouter / OpenAI / Other**
 
 ```bash
 export WTF_API_KEY="your-api-key"
-export WTF_BASE_URL="https://openrouter.ai/api/v1"  # or your provider's URL
-export WTF_MODEL="anthropic/claude-3-haiku"          # or any model
+export WTF_BASE_URL="https://openrouter.ai/api/v1"
+export WTF_MODEL="anthropic/claude-3-haiku"
 ```
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `WTF_API_KEY` | - | API key (or use `GEMINI_API_KEY`) |
-| `WTF_BASE_URL` | Gemini URL | Custom base URL (enables OpenAI-compatible mode) |
-| `WTF_MODEL` | `gemini-2.0-flash` | Model to use |
+### 2. Enable Shell Integration (Required)
 
-Add to your `~/.zshrc` to persist.
+Add this to your `~/.zshrc` (or `~/.bashrc`) to enable the buffer magic:
+
+```bash
+eval "$(wtf --init zsh)"
+```
+
+Then reload: `source ~/.zshrc`
 
 ## Usage
 
@@ -82,37 +86,7 @@ wtf "show disk usage"
 wtf "what is 2+2"
 ```
 
-## Oh My Zsh Plugin
 
-If you're using Oh My Zsh, the plugin is already giving you the best experience:
-
-```bash
-# The ?? alias also works
-?? "show my ip"
-```
-
-> **Note:** If you installed via Homebrew AND have the plugin, the plugin takes over for the smoother buffer experience. To use the raw binary with y/n/e prompts, call it directly: `/opt/homebrew/bin/wtf "prompt"`
-
-## Manual Install (Without Plugin)
-
-If you're NOT using Oh My Zsh, the raw binary shows an interactive prompt:
-
-```bash
-$ /opt/homebrew/bin/wtf "show my ip"
-
-💡 Suggested command:
-
-   curl -s ifconfig.me
-
-Execute? [yes/No/edit]: y
-▶️  Running...
-```
-
-| Key | Action |
-|-----|--------|
-| `y` | Run the command |
-| `e` | Copy to clipboard for editing |
-| `n` | Cancel (copies to clipboard) |
 
 ## How It Works
 

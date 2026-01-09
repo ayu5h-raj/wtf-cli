@@ -2,20 +2,23 @@ use anyhow::{Context, Result};
 use clap::Parser;
 use serde::{Deserialize, Serialize};
 use std::env;
-use std::io::{self, Write};
-use std::process::Command;
+
 
 /// WTF (Write The Formula) - Translate natural language to shell commands using AI
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Args {
     /// The natural language prompt describing what you want to do
-    #[arg(required = true)]
+    #[arg(required = false)]
     prompt: Vec<String>,
 
     /// Output only the command (no interactive prompt). Useful for scripting.
     #[arg(short, long)]
     raw: bool,
+
+    /// Print shell integration script. Usage: eval "$(wtf --init zsh)"
+    #[arg(long, value_name = "SHELL")]
+    init: Option<String>,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -180,60 +183,100 @@ Output: tar -czvf archive.tar.gz .
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
+
+    // Handle --init flag for shell integration
+    if let Some(shell) = &args.init {
+        print_init_script(shell);
+        return Ok(());
+    }
+
+    // Check if prompt is provided
+    if args.prompt.is_empty() {
+        eprintln!("Usage: wtf <natural language prompt>");
+        eprintln!("       wtf --init zsh   # Print shell integration script");
+        eprintln!("\nExample: wtf show my ip address");
+        std::process::exit(1);
+    }
+
     let prompt = args.prompt.join(" ");
     let config = Config::from_env()?;
 
     let command = get_command(&config, &prompt).await?;
     let command = command.trim();
 
-    // Raw mode: just output the command and exit
+    // Raw mode: just output the command (for shell wrapper)
     if args.raw {
         println!("{}", command);
         return Ok(());
     }
 
-    // Display the suggested command
-    println!("\n💡 \x1b[1mSuggested command:\x1b[0m\n");
-    println!("   \x1b[36m{}\x1b[0m\n", command);
-
-    // Interactive prompt
-    print!("Execute? [\x1b[32my\x1b[0mes/\x1b[31mN\x1b[0mo/\x1b[33me\x1b[0mdit]: ");
-    io::stdout().flush()?;
-
-    let mut input = String::new();
-    io::stdin().read_line(&mut input)?;
-    let input = input.trim().to_lowercase();
-
-    match input.as_str() {
-        "y" | "yes" => {
-            println!("\n▶️  \x1b[1mRunning...\x1b[0m\n");
-            let status = Command::new("sh")
-                .arg("-c")
-                .arg(command)
-                .status()
-                .context("Failed to execute command")?;
-
-            if !status.success() {
-                std::process::exit(status.code().unwrap_or(1));
-            }
-        }
-        "e" | "edit" => {
-            let _ = Command::new("sh")
-                .arg("-c")
-                .arg(format!("printf '%s' '{}' | pbcopy", command.replace("'", "'\\''")))
-                .status();
-            println!("📋 Command copied to clipboard. Paste and edit it!");
-        }
-        _ => {
-            let _ = Command::new("sh")
-                .arg("-c")
-                .arg(format!("printf '%s' '{}' | pbcopy", command.replace("'", "'\\''")))
-                .status();
-            println!("📋 Cancelled. Command copied to clipboard.");
-        }
-    }
+    // Default mode: show command with emoji
+    println!("💡 \x1b[36m{}\x1b[0m", command);
 
     Ok(())
+}
+
+fn print_init_script(shell: &str) {
+    match shell {
+        "zsh" => {
+            print!(r#"# WTF (Write The Formula) - Shell integration
+# Add to ~/.zshrc: eval "$(wtf --init zsh)"
+
+function wtf() {{
+    if [[ -z "$1" ]]; then
+        echo "Usage: wtf <natural language prompt>"
+        return 1
+    fi
+
+    local cmd
+    cmd=$(command wtf --raw "$@" 2>&1)
+    local exit_code=$?
+
+    if [[ $exit_code -ne 0 ]]; then
+        echo "❌ $cmd"
+        return 1
+    fi
+
+    echo "💡 \033[36m$cmd\033[0m"
+    print -z "$cmd"
+}}
+
+alias '??'='wtf'
+"#);
+        }
+        "bash" => {
+            print!(r#"# WTF (Write The Formula) - Shell integration
+# Add to ~/.bashrc: eval "$(wtf --init bash)"
+
+function wtf() {{
+    if [[ -z "$1" ]]; then
+        echo "Usage: wtf <natural language prompt>"
+        return 1
+    fi
+
+    local cmd
+    cmd=$(command wtf --raw "$@" 2>&1)
+    local exit_code=$?
+
+    if [[ $exit_code -ne 0 ]]; then
+        echo "❌ $cmd"
+        return 1
+    fi
+
+    echo "💡 $cmd"
+    # Bash doesn't have print -z, so just show the command
+    echo "📋 Copied to clipboard"
+    printf '%s' "$cmd" | pbcopy
+}}
+
+alias '??'='wtf'
+"#);
+        }
+        _ => {
+            eprintln!("Unsupported shell: {}. Supported: zsh, bash", shell);
+            std::process::exit(1);
+        }
+    }
 }
 
 async fn get_command(config: &Config, prompt: &str) -> Result<String> {
