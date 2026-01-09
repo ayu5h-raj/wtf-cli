@@ -63,7 +63,7 @@ export WTF_MODEL="anthropic/claude-3-haiku"
 Add this to your `~/.zshrc` (or `~/.bashrc`) to enable the buffer magic:
 
 ```bash
-eval "$(wtf --init zsh)"
+eval "$(command wtf --init zsh)"
 ```
 
 Then reload: `source ~/.zshrc`

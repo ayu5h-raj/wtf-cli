@@ -193,7 +193,7 @@ async fn main() -> Result<()> {
     // Check if prompt is provided
     if args.prompt.is_empty() {
         eprintln!("Usage: wtf <natural language prompt>");
-        eprintln!("       wtf --init zsh   # Print shell integration script");
+        eprintln!("       eval \"$(command wtf --init zsh)\"");
         eprintln!("\nExample: wtf show my ip address");
         std::process::exit(1);
     }
@@ -220,7 +220,7 @@ fn print_init_script(shell: &str) {
     match shell {
         "zsh" => {
             print!(r#"# WTF (Write The Formula) - Shell integration
-# Add to ~/.zshrc: eval "$(wtf --init zsh)"
+# Add to ~/.zshrc: eval "$(command wtf --init zsh)"
 
 function wtf() {{
     if [[ -z "$1" ]]; then
