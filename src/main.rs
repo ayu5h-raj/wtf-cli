@@ -204,7 +204,14 @@ async fn main() -> Result<()> {
     let config = Config::from_env()?;
 
     let command = get_command(&config, &prompt).await?;
-    let command = command.trim();
+    // Strip markdown code blocks if present
+    let command = command
+        .trim()
+        .trim_start_matches("```bash")
+        .trim_start_matches("```sh")
+        .trim_start_matches("```")
+        .trim_end_matches("```")
+        .trim();
 
     // Raw mode: just output the command (for shell wrapper)
     if args.raw {
