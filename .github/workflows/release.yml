@@ -76,7 +76,7 @@ jobs:
             **Homebrew (macOS)**
             ```bash
             brew tap ayu5h-raj/tap
-            brew install wtf
+            brew install wtf-cli
             ```
 
             **Using Cargo**
@@ -164,8 +164,8 @@ jobs:
           mkdir -p Formula
 
           # Create the formula file
-          cat > Formula/wtf.rb << 'FORMULA_EOF'
-          class Wtf < Formula
+          cat > Formula/wtf-cli.rb << 'FORMULA_EOF'
+          class WtfCli < Formula
             desc "Write The Formula - AI-powered natural language to shell command translator"
             homepage "https://github.com/ayu5h-raj/wtf-cli"
             version "VERSION_PLACEHOLDER"
@@ -206,16 +206,16 @@ jobs:
           FORMULA_EOF
 
           # Replace placeholders
-          sed -i "s/VERSION_PLACEHOLDER/${FORMULA_VERSION}/g" Formula/wtf.rb
-          sed -i "s/SHA256_ARM64_PLACEHOLDER/${SHA256_ARM64}/g" Formula/wtf.rb
-          sed -i "s/SHA256_INTEL_PLACEHOLDER/${SHA256_INTEL}/g" Formula/wtf.rb
+          sed -i "s/VERSION_PLACEHOLDER/${FORMULA_VERSION}/g" Formula/wtf-cli.rb
+          sed -i "s/SHA256_ARM64_PLACEHOLDER/${SHA256_ARM64}/g" Formula/wtf-cli.rb
+          sed -i "s/SHA256_INTEL_PLACEHOLDER/${SHA256_INTEL}/g" Formula/wtf-cli.rb
 
           # Fix indentation (remove leading spaces from heredoc)
-          sed -i 's/^          //' Formula/wtf.rb
+          sed -i 's/^          //' Formula/wtf-cli.rb
 
           # Commit and push
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add Formula/wtf.rb
-          git commit -m "Update WTF to ${VERSION}"
+          git add Formula/wtf-cli.rb
+          git commit -m "Update wtf-cli to ${VERSION}"
           git push

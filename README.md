@@ -21,7 +21,7 @@ The command is placed directly in your terminal — just press **Enter** to run,
 
 ```bash
 brew tap ayu5h-raj/tap
-brew install wtf
+brew install wtf-cli
 ```
 
 ### Cargo
