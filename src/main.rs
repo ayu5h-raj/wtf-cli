@@ -2,8 +2,6 @@ use anyhow::{Context, Result};
 use clap::Parser;
 use serde::{Deserialize, Serialize};
 use std::env;
-use std::fs;
-use std::process::Command;
 
 
 /// WTF (Write The Formula) - Translate natural language to shell commands using AI
@@ -312,13 +310,6 @@ async fn get_command(config: &Config, prompt: &str) -> Result<String> {
 async fn get_command_gemini(config: &Config, prompt: &str) -> Result<String> {
     let client = reqwest::Client::new();
 
-    let context = get_combined_context();
-    let system_content = if context.is_empty() {
-        SYSTEM_PROMPT.to_string()
-    } else {
-        format!("{}{}", SYSTEM_PROMPT, context)
-    };
-
     let request_body = GeminiRequest {
         contents: vec![GeminiContent {
             parts: vec![Part {
@@ -327,7 +318,7 @@ async fn get_command_gemini(config: &Config, prompt: &str) -> Result<String> {
         }],
         system_instruction: GeminiContent {
             parts: vec![Part {
-                text: system_content,
+                text: SYSTEM_PROMPT.to_string(),
             }],
         },
     };
@@ -371,19 +362,12 @@ async fn get_command_gemini(config: &Config, prompt: &str) -> Result<String> {
 async fn get_command_openai(config: &Config, prompt: &str) -> Result<String> {
     let client = reqwest::Client::new();
 
-    let context = get_combined_context();
-    let system_content = if context.is_empty() {
-        SYSTEM_PROMPT.to_string()
-    } else {
-        format!("{}{}", SYSTEM_PROMPT, context)
-    };
-
     let request_body = OpenAIRequest {
         model: config.model.clone(),
         messages: vec![
             Message {
                 role: "system".to_string(),
-                content: system_content,
+                content: SYSTEM_PROMPT.to_string(),
             },
             Message {
                 role: "user".to_string(),
@@ -427,118 +411,4 @@ async fn get_command_openai(config: &Config, prompt: &str) -> Result<String> {
     Ok(command)
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Context Awareness
-// ─────────────────────────────────────────────────────────────────────────────
 
-fn get_combined_context() -> String {
-    // Check if context is disabled
-    if env::var("WTF_NO_CONTEXT").is_ok() {
-        return String::new();
-    }
-
-    let mut context_str = String::new();
-    let dir_context = get_directory_context();
-    let git_context = get_git_context();
-    let project_context = get_project_context();
-
-    if dir_context.is_empty() && git_context.is_empty() && project_context.is_empty() {
-        return String::new();
-    }
-    
-    context_str.push_str("\nCurrent Directory Context:\n");
-    
-    if !project_context.is_empty() {
-        context_str.push_str("Project Metadata:\n");
-        context_str.push_str(&project_context);
-        context_str.push_str("\n");
-    }
-
-    if !dir_context.is_empty() {
-        context_str.push_str("Files: [");
-        context_str.push_str(&dir_context);
-        context_str.push_str("]\n");
-    }
-
-    if !git_context.is_empty() {
-        context_str.push_str("Git Status:\n");
-        context_str.push_str(&git_context);
-        context_str.push_str("\n");
-    }
-
-    context_str
-}
-
-fn get_directory_context() -> String {
-    let mut files = Vec::new();
-    if let Ok(entries) = fs::read_dir(".") {
-        for entry in entries.flatten() {
-            if let Ok(name) = entry.file_name().into_string() {
-                // Skip hidden files and .git
-                if !name.starts_with('.') {
-                    files.push(name);
-                }
-            }
-        }
-    }
-
-    // Sort to be deterministic
-    files.sort();
-
-    // Limit to 50 files to save tokens
-    if files.len() > 50 {
-        files.truncate(50);
-        files.push("... (truncated)".to_string());
-    }
-
-    files.join(", ")
-}
-
-fn get_git_context() -> String {
-    let output = Command::new("git")
-        .args(["status", "--short"])
-        .output();
-
-    match output {
-        Ok(output) if output.status.success() => {
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            let lines: Vec<&str> = stdout.lines().collect();
-            
-            if lines.is_empty() {
-                return String::new();
-            }
-
-            // Limit to 20 lines
-            if lines.len() > 20 {
-                let mut limited = lines[..20].to_vec();
-                limited.push("... (truncated)");
-                return limited.join("\n");
-            }
-            
-            stdout.to_string()
-        }
-        _ => String::new(), // Not a git repo or git not found
-    }
-}
-
-fn get_project_context() -> String {
-    let metadata_files = ["Cargo.toml", "package.json", "go.mod", "pyproject.toml"];
-    let mut context = String::new();
-
-    for file in metadata_files.iter() {
-        if let Ok(content) = fs::read_to_string(file) {
-            context.push_str(&format!("--- {} ---\n", file));
-            
-            // Read first 20 lines
-            let lines: Vec<&str> = content.lines().take(20).collect();
-            context.push_str(&lines.join("\n"));
-            
-            if content.lines().count() > 20 {
-                context.push_str("\n... (truncated)");
-            }
-            context.push_str("\n\n");
-        }
-    }
-
-    context
-}
