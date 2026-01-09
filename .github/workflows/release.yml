@@ -189,14 +189,14 @@ jobs:
             def caveats
               <<~EOS
                 To use WTF, set an API key:
-                
-                Gemini (free): export GEMINI_API_KEY='your-key'
-                Other:         export WTF_API_KEY='key' WTF_BASE_URL='url' WTF_MODEL='model'
-                
-                *** REQUIRED: ENABLE SHELL INTEGRATION ***
-                Add to your ~/.zshrc or ~/.bashrc:
 
-                    eval "$(command wtf --init zsh)"
+                Gemini (free): export GEMINI_API_KEY='your-key'
+                Other:         export WTF_API_KEY='key' ...
+
+                *** REQUIRED: ENABLE SHELL INTEGRATION ***
+                Add the following to your shell config (~/.zshrc or ~/.bashrc):
+
+                  eval "$(command wtf --init zsh)"
 
                 Get a free Gemini key: https://aistudio.google.com/app/apikey
 
