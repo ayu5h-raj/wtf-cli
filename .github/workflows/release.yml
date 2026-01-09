@@ -1,0 +1,205 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - target: x86_64-apple-darwin
+            os: macos-latest
+            name: wtf-macos-intel
+          - target: aarch64-apple-darwin
+            os: macos-latest
+            name: wtf-macos-arm64
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            name: wtf-linux-x64
+
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Build release binary
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Create archive (Unix)
+        run: |
+          cd target/${{ matrix.target }}/release
+          tar -czvf ../../../${{ matrix.name }}-${{ github.ref_name }}.tar.gz wtf
+          cd ../../..
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}
+          path: ${{ matrix.name }}-${{ github.ref_name }}.tar.gz
+
+  create-release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: List artifacts
+        run: find artifacts -type f
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          name: WTF ${{ github.ref_name }}
+          body: |
+            ## WTF (Write The Formula) ${{ github.ref_name }}
+
+            AI-powered natural language to shell command translator.
+
+            ### Installation
+
+            **Homebrew (macOS)**
+            ```bash
+            brew tap ayu5h-raj/tap
+            brew install wtf
+            ```
+
+            **Using Cargo**
+            ```bash
+            cargo install wtf
+            ```
+
+            **Manual Download**
+            1. Download the appropriate archive for your platform
+            2. Extract: `tar -xzf wtf-*.tar.gz`
+            3. Move to PATH: `sudo mv wtf /usr/local/bin/`
+
+            **Oh My Zsh Plugin**
+            ```bash
+            git clone https://github.com/ayu5h-raj/wtf-cli ~/.oh-my-zsh/custom/plugins/wtf
+            # Add 'wtf' to plugins in ~/.zshrc
+            ```
+
+            ### Usage
+            ```bash
+            export GEMINI_API_KEY='your-key'
+            wtf "show my ip address"
+            ```
+          files: |
+            artifacts/**/*.tar.gz
+          draft: false
+          prerelease: false
+
+  update-homebrew:
+    needs: create-release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Update Homebrew Tap
+        env:
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          VERSION: ${{ github.ref_name }}
+        run: |
+          # Remove 'v' prefix for formula version
+          FORMULA_VERSION="${VERSION#v}"
+
+          # Wait for release to be available, then download and calculate SHA256
+          MAX_RETRIES=5
+          RETRY_DELAY=10
+          for i in $(seq 1 $MAX_RETRIES); do
+            if curl -f -sL "https://github.com/ayu5h-raj/wtf-cli/releases/download/${VERSION}/wtf-macos-arm64-${VERSION}.tar.gz" -o wtf.tar.gz; then
+              break
+            fi
+            if [ $i -eq $MAX_RETRIES ]; then
+              echo "Failed to download release after $MAX_RETRIES attempts"
+              exit 1
+            fi
+            echo "Download failed, retrying in ${RETRY_DELAY}s... (attempt $i/$MAX_RETRIES)"
+            sleep $RETRY_DELAY
+            RETRY_DELAY=$((RETRY_DELAY * 2))
+          done
+
+          SHA256_ARM64=$(shasum -a 256 wtf.tar.gz | cut -d' ' -f1)
+
+          # Download Intel version
+          curl -f -sL "https://github.com/ayu5h-raj/wtf-cli/releases/download/${VERSION}/wtf-macos-intel-${VERSION}.tar.gz" -o wtf-intel.tar.gz
+          SHA256_INTEL=$(shasum -a 256 wtf-intel.tar.gz | cut -d' ' -f1)
+
+          echo "Version: $FORMULA_VERSION"
+          echo "SHA256 ARM64: $SHA256_ARM64"
+          echo "SHA256 Intel: $SHA256_INTEL"
+
+          # Clone homebrew-tap repo
+          git clone https://x-access-token:${HOMEBREW_TAP_TOKEN}@github.com/ayu5h-raj/homebrew-tap.git
+          cd homebrew-tap
+
+          # Create Formula directory if it doesn't exist
+          mkdir -p Formula
+
+          # Create the formula file
+          cat > Formula/wtf.rb << 'FORMULA_EOF'
+          class Wtf < Formula
+            desc "Write The Formula - AI-powered natural language to shell command translator"
+            homepage "https://github.com/ayu5h-raj/wtf-cli"
+            version "VERSION_PLACEHOLDER"
+            license "MIT"
+
+            on_macos do
+              on_arm do
+                url "https://github.com/ayu5h-raj/wtf-cli/releases/download/vVERSION_PLACEHOLDER/wtf-macos-arm64-vVERSION_PLACEHOLDER.tar.gz"
+                sha256 "SHA256_ARM64_PLACEHOLDER"
+              end
+              on_intel do
+                url "https://github.com/ayu5h-raj/wtf-cli/releases/download/vVERSION_PLACEHOLDER/wtf-macos-intel-vVERSION_PLACEHOLDER.tar.gz"
+                sha256 "SHA256_INTEL_PLACEHOLDER"
+              end
+            end
+
+            def install
+              bin.install "wtf"
+            end
+
+            def caveats
+              <<~EOS
+                To use WTF, you need a Gemini API key:
+                  1. Get a free key at https://aistudio.google.com/app/apikey
+                  2. Add to your shell: export GEMINI_API_KEY='your-key'
+
+                Usage: wtf "your question here"
+              EOS
+            end
+
+            test do
+              assert_match "Write The Formula", shell_output("#{bin}/wtf --help")
+            end
+          end
+          FORMULA_EOF
+
+          # Replace placeholders
+          sed -i "s/VERSION_PLACEHOLDER/${FORMULA_VERSION}/g" Formula/wtf.rb
+          sed -i "s/SHA256_ARM64_PLACEHOLDER/${SHA256_ARM64}/g" Formula/wtf.rb
+          sed -i "s/SHA256_INTEL_PLACEHOLDER/${SHA256_INTEL}/g" Formula/wtf.rb
+
+          # Fix indentation (remove leading spaces from heredoc)
+          sed -i 's/^          //' Formula/wtf.rb
+
+          # Commit and push
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Formula/wtf.rb
+          git commit -m "Update WTF to ${VERSION}"
+          git push
