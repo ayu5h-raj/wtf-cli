@@ -228,16 +228,27 @@ function wtf() {{
         return 1
     fi
 
+    # Show loading state
+    echo -n "⏳ Generating..." >&2
+
     local cmd
+    # Use the binary to get the command (raw mode)
     cmd=$(command wtf --raw "$@" 2>&1)
     local exit_code=$?
+
+    # Clear loading state (CR + Clear Line)
+    echo -ne "\r\033[K" >&2
 
     if [[ $exit_code -ne 0 ]]; then
         echo "❌ $cmd"
         return 1
     fi
 
+    # Show the command with formatting
     echo "💡 \033[36m$cmd\033[0m"
+    echo ""
+    
+    # Put in buffer (print -z)
     print -z "$cmd"
 }}
 
@@ -254,9 +265,13 @@ function wtf() {{
         return 1
     fi
 
+    echo -n "⏳ Generating..." >&2
+
     local cmd
     cmd=$(command wtf --raw "$@" 2>&1)
     local exit_code=$?
+
+    echo -ne "\r\033[K" >&2
 
     if [[ $exit_code -ne 0 ]]; then
         echo "❌ $cmd"
@@ -264,7 +279,6 @@ function wtf() {{
     fi
 
     echo "💡 $cmd"
-    # Bash doesn't have print -z, so just show the command
     echo "📋 Copied to clipboard"
     printf '%s' "$cmd" | pbcopy
 }}
