@@ -2,6 +2,10 @@ use anyhow::{Context, Result};
 use clap::Parser;
 use serde::{Deserialize, Serialize};
 use std::env;
+use std::fs::{self, OpenOptions};
+use std::io::Write;
+use std::path::{Path, PathBuf};
+use chrono::Utc;
 
 
 /// WTF (Write The Formula) - Translate natural language to shell commands using AI
@@ -19,6 +23,26 @@ struct Args {
     /// Print shell integration script. Usage: eval "$(wtf --init zsh)"
     #[arg(long, value_name = "SHELL")]
     init: Option<String>,
+
+    /// Show command history
+    #[arg(long)]
+    history: bool,
+
+    /// Explain the generated command
+    #[arg(short, long)]
+    explain: bool,
+}
+
+#[derive(Serialize, Deserialize)]
+struct HistoryEntry {
+    timestamp: i64,
+    prompt: String,
+    command: String,
+}
+
+struct CommandResult {
+    command: String,
+    explanation: Option<String>,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -180,6 +204,16 @@ User: compress this folder
 Output: tar -czvf archive.tar.gz .
 "#;
 
+const SYSTEM_PROMPT_EXPLAIN: &str = r#"You are a shell command expert.
+1. Output the shell command.
+2. Output a separator: " ### "
+3. Output a concise explanation of what the command does.
+
+Example:
+User: list files
+Output: ls -la ### Lists all files including hidden ones in long format.
+"#;
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
@@ -192,6 +226,11 @@ async fn main() -> Result<()> {
 
     // Check if prompt is provided
     if args.prompt.is_empty() {
+        if args.history {
+            show_history()?;
+            return Ok(());
+        }
+
         eprintln!("Usage: wtf <natural language prompt>");
         eprintln!("       eval \"$(command wtf --init zsh)\"");
         eprintln!("\nExample: wtf show my ip address");
@@ -201,15 +240,21 @@ async fn main() -> Result<()> {
     let prompt = args.prompt.join(" ");
     let config = Config::from_env()?;
 
-    let command = get_command(&config, &prompt).await?;
-    // Strip markdown code blocks if present
-    let command = command
+    let result = get_command(&config, &prompt, args.explain).await?;
+    
+    // Strip markdown code blocks if present in command
+    let command = result.command
         .trim()
         .trim_start_matches("```bash")
         .trim_start_matches("```sh")
         .trim_start_matches("```")
         .trim_end_matches("```")
         .trim();
+        
+    // Save to history
+    if let Err(e) = append_to_history(&prompt, command) {
+        eprintln!("Warning: Failed to save history: {}", e);
+    }
 
     // Raw mode: just output the command (for shell wrapper)
     if args.raw {
@@ -219,6 +264,10 @@ async fn main() -> Result<()> {
 
     // Default mode: show command with emoji
     println!("💡 \x1b[36m{}\x1b[0m", command);
+    
+    if let Some(explanation) = result.explanation {
+        println!("\x1b[90m📝 {}\x1b[0m", explanation.trim());
+    }
 
     Ok(())
 }
@@ -300,15 +349,17 @@ alias '??'='wtf'
     }
 }
 
-async fn get_command(config: &Config, prompt: &str) -> Result<String> {
+async fn get_command(config: &Config, prompt: &str, explain: bool) -> Result<CommandResult> {
     match config.provider {
-        Provider::Gemini => get_command_gemini(config, prompt).await,
-        Provider::OpenAI => get_command_openai(config, prompt).await,
+        Provider::Gemini => get_command_gemini(config, prompt, explain).await,
+        Provider::OpenAI => get_command_openai(config, prompt, explain).await,
     }
 }
 
-async fn get_command_gemini(config: &Config, prompt: &str) -> Result<String> {
+async fn get_command_gemini(config: &Config, prompt: &str, explain: bool) -> Result<CommandResult> {
     let client = reqwest::Client::new();
+    
+    let system_prompt = if explain { SYSTEM_PROMPT_EXPLAIN } else { SYSTEM_PROMPT };
 
     let request_body = GeminiRequest {
         contents: vec![GeminiContent {
@@ -318,7 +369,7 @@ async fn get_command_gemini(config: &Config, prompt: &str) -> Result<String> {
         }],
         system_instruction: GeminiContent {
             parts: vec![Part {
-                text: SYSTEM_PROMPT.to_string(),
+                text: system_prompt.to_string(),
             }],
         },
     };
@@ -349,25 +400,27 @@ async fn get_command_gemini(config: &Config, prompt: &str) -> Result<String> {
         anyhow::bail!("Gemini API error: {}", error.message);
     }
 
-    let command = gemini_response
+    let text = gemini_response
         .candidates
         .and_then(|c| c.into_iter().next())
         .and_then(|c| c.content.parts.into_iter().next())
         .map(|p| p.text)
         .context("No command generated from Gemini")?;
-
-    Ok(command)
+        
+    Ok(parse_output(&text))
 }
 
-async fn get_command_openai(config: &Config, prompt: &str) -> Result<String> {
+async fn get_command_openai(config: &Config, prompt: &str, explain: bool) -> Result<CommandResult> {
     let client = reqwest::Client::new();
+
+    let system_prompt = if explain { SYSTEM_PROMPT_EXPLAIN } else { SYSTEM_PROMPT };
 
     let request_body = OpenAIRequest {
         model: config.model.clone(),
         messages: vec![
             Message {
                 role: "system".to_string(),
-                content: SYSTEM_PROMPT.to_string(),
+                content: system_prompt.to_string(),
             },
             Message {
                 role: "user".to_string(),
@@ -402,13 +455,100 @@ async fn get_command_openai(config: &Config, prompt: &str) -> Result<String> {
         anyhow::bail!("API error: {}", error.message);
     }
 
-    let command = openai_response
+    let text = openai_response
         .choices
         .and_then(|c| c.into_iter().next())
         .map(|c| c.message.content)
         .context("No command generated from API")?;
 
-    Ok(command)
+    Ok(parse_output(&text))
+}
+
+fn parse_output(text: &str) -> CommandResult {
+    if let Some((cmd, expl)) = text.split_once("###") {
+        CommandResult {
+            command: cmd.trim().to_string(),
+            explanation: Some(expl.trim().to_string()),
+        }
+    } else {
+        CommandResult {
+            command: text.trim().to_string(),
+            explanation: None,
+        }
+    }
 }
 
 
+
+// ─────────────────────────────────────────────────────────────────────────────
+// History
+// ─────────────────────────────────────────────────────────────────────────────
+
+fn get_history_path() -> Result<PathBuf> {
+    let home = env::var("HOME").context("Could not find HOME directory")?;
+    Ok(Path::new(&home).join(".wtf_history"))
+}
+
+fn append_to_history(prompt: &str, command: &str) -> Result<()> {
+    let path = get_history_path()?;
+    
+    let entry = HistoryEntry {
+        timestamp: Utc::now().timestamp(),
+        prompt: prompt.to_string(),
+        command: command.to_string(),
+    };
+    
+    let json = serde_json::to_string(&entry)?;
+    
+    // Read existing
+    let mut lines: Vec<String> = Vec::new();
+    if path.exists() {
+        let content = fs::read_to_string(&path)?;
+        lines = content.lines().map(|s| s.to_string()).collect();
+    }
+    
+    // Append new
+    lines.push(json);
+    
+    // Truncate if > 1000
+    if lines.len() > 1000 {
+        let remove_count = lines.len() - 1000;
+        lines.drain(0..remove_count);
+    }
+    
+    // Write back
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .open(path)?;
+        
+    for line in lines {
+        writeln!(file, "{}", line)?;
+    }
+    
+    Ok(())
+}
+
+fn show_history() -> Result<()> {
+    let path = get_history_path()?;
+    if !path.exists() {
+        println!("No history found.");
+        return Ok(());
+    }
+    
+    let content = fs::read_to_string(&path)?;
+    let lines: Vec<&str> = content.lines().collect();
+    
+    // Show last 20
+    let start = if lines.len() > 20 { lines.len() - 20 } else { 0 };
+    
+    println!("Example History (Last 20):");
+    for line in &lines[start..] {
+        if let Ok(entry) = serde_json::from_str::<HistoryEntry>(line) {
+            println!("• {} -> \x1b[36m{}\x1b[0m", entry.prompt, entry.command);
+        }
+    }
+    
+    Ok(())
+}
