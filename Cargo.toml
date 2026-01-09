@@ -1,0 +1,18 @@
+[package]
+name = "wtf"
+version = "0.1.0"
+edition = "2024"
+description = "Write The Formula - AI-powered natural language to shell command translator"
+authors = ["Ayush Raj"]
+license = "MIT"
+repository = "https://github.com/ayu5h-raj/wtf-cli"
+keywords = ["cli", "ai", "gemini", "zsh", "terminal", "wtf"]
+categories = ["command-line-utilities"]
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+anyhow = "1"

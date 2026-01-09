@@ -1,0 +1,16 @@
+# Build artifacts
+/target
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# macOS
+.DS_Store
+
+# Environment (in case someone puts API key in a file)
+.env
+.env.local
